@@ -1,0 +1,17 @@
+/* Make the app fill the whole viewport */
+html, body, #root {
+  height: 100%;
+  width: 100%;
+  margin: 0;
+}
+
+/* Ant Design apps usually use a light background */
+body {
+  background: #f5f5f5;
+}
+
+/* Remove Vite template constraints */
+#root {
+  max-width: none;
+  padding: 0;
+}
