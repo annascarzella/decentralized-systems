@@ -1,5 +1,8 @@
-export const PROXY_ADDRESS = "0xfFD669cb3C0c97eE7c993f4019f63BACA18685f3";
+import { getAddress } from "ethers";
 
-// set to your network:
-// Sepolia = 11155111
-export const REQUIRED_CHAIN_ID = 11155111;
+export const PROXY_ADDRESS = getAddress(import.meta.env.VITE_PROXY_ADDRESS);
+
+// network
+export const REQUIRED_CHAIN_ID = Number(import.meta.env.VITE_CHAIN_ID);
+
+
