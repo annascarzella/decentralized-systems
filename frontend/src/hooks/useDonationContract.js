@@ -22,20 +22,22 @@ export function useDonationContract({ getProvider, account, enabled }) {
 
   // Charities
   const [charities, setCharities] = useState([]); // [{address, name, allocatedWei}]
-  const [selectedCharity, setSelectedCharity] = useState("");
 
-  const isOwner = useMemo(() => safeLower(owner) === safeLower(account) && !!owner, [owner, account]);
+  const isOwner = useMemo(
+    () => safeLower(owner) === safeLower(account) && !!owner,
+    [owner, account]
+  );
 
-  async function getReadContract() {
+  const getReadContract = useCallback(async () => {
     const provider = await getProvider();
     return new ethers.Contract(PROXY_ADDRESS, abi, provider);
-  }
+  }, [getProvider]);
 
-  async function getWriteContract() {
+  const getWriteContract = useCallback(async () => {
     const provider = await getProvider();
     const signer = await provider.getSigner();
     return new ethers.Contract(PROXY_ADDRESS, abi, signer);
-  }
+  }, [getProvider]);
 
   const refreshCore = useCallback(async () => {
     if (!enabled) return;
@@ -55,7 +57,7 @@ export function useDonationContract({ getProvider, account, enabled }) {
     setTotalDonatedWei(totalW);
     setMyDonatedWei(myW);
     setContractBalWei(balW);
-  }, [enabled, getProvider, account]);
+  }, [enabled, getProvider, getReadContract, account]);
 
   const refreshCharities = useCallback(async () => {
     if (!enabled) return;
@@ -67,7 +69,7 @@ export function useDonationContract({ getProvider, account, enabled }) {
       Array.from({ length: count }, (_, i) => c.charities(i))
     );
 
-    // Try reading on-chain names (V3). If not present in ABI/contract, fallback to address.
+    // Try reading on-chain names (V3). If not present in ABI/contract, fallback to short address.
     const rows = await Promise.all(
       addrs.map(async (a) => {
         let name = "";
@@ -85,21 +87,13 @@ export function useDonationContract({ getProvider, account, enabled }) {
           allocatedWei = null;
         }
 
-        const label = (name && name.trim().length > 0) ? name : shortHex(a);
+        const label = name && name.trim().length > 0 ? name : shortHex(a);
         return { address: a, name: label, allocatedWei };
       })
     );
 
     setCharities(rows);
-
-    // Keep selection stable
-    if (!selectedCharity && rows.length > 0) {
-      setSelectedCharity(rows[0].address);
-    } else if (selectedCharity) {
-      const stillExists = rows.some((r) => safeLower(r.address) === safeLower(selectedCharity));
-      if (!stillExists && rows.length > 0) setSelectedCharity(rows[0].address);
-    }
-  }, [enabled, selectedCharity, getProvider]);
+  }, [enabled, getReadContract]);
 
   const refreshAll = useCallback(async () => {
     try {
@@ -110,46 +104,65 @@ export function useDonationContract({ getProvider, account, enabled }) {
     }
   }, [refreshCore, refreshCharities]);
 
-  async function donateToCharity({ charity, amountEth }) {
-    const value = ethers.parseEther(String(amountEth).trim());
-    if (minDonationWei > 0n && value < minDonationWei) {
-      throw new Error(`Donation too small. Min is ${ethers.formatEther(minDonationWei)} ETH`);
-    }
+  const donateToCharity = useCallback(
+    async ({ charity, amountEth }) => {
+      const value = ethers.parseEther(String(amountEth).trim());
 
-    const c = await getWriteContract();
+      if (minDonationWei > 0n && value < minDonationWei) {
+        throw new Error(
+          `Donation too small. Min is ${ethers.formatEther(minDonationWei)} ETH`
+        );
+      }
 
-    // Must exist in ABI/contract:
-    // function donateToCharity(address charity) external payable
-    const tx = await c.donateToCharity(charity, { value });
-    message.loading({ content: "Donation sent…", key: "donate" });
-    await tx.wait();
-    message.success({ content: "Donation confirmed ✅", key: "donate" });
+      const c = await getWriteContract();
 
-    await refreshAll();
-  }
+      // Must exist in ABI/contract:
+      // function donateToCharity(address charity) external payable
+      const tx = await c.donateToCharity(charity, { value });
+      message.loading({ content: "Donation sent…", key: "donate" });
+      await tx.wait();
+      message.success({ content: "Donation confirmed ✅", key: "donate" });
 
-  async function withdrawOwner({ to, amountEth }) {
-    if (!ethers.isAddress(to)) throw new Error("Invalid recipient address.");
-    if (!isOwner) throw new Error("Only owner can withdraw.");
+      await refreshAll();
+    },
+    [getWriteContract, minDonationWei, refreshAll]
+  );
 
-    const amountWei = ethers.parseEther(String(amountEth).trim());
-    const c = await getWriteContract();
+  const withdrawOwner = useCallback(
+    async ({ to, amountEth }) => {
+      if (!ethers.isAddress(to)) throw new Error("Invalid recipient address.");
+      if (!isOwner) throw new Error("Only owner can withdraw.");
 
-    const tx = await c.withdraw(to, amountWei);
-    message.loading({ content: "Withdraw sent…", key: "withdraw" });
-    await tx.wait();
-    message.success({ content: "Withdraw confirmed ✅", key: "withdraw" });
+      const amountWei = ethers.parseEther(String(amountEth).trim());
+      const c = await getWriteContract();
 
-    await refreshAll();
-  }
+      const tx = await c.withdraw(to, amountWei);
+      message.loading({ content: "Withdraw sent…", key: "withdraw" });
+      await tx.wait();
+      message.success({ content: "Withdraw confirmed ✅", key: "withdraw" });
+
+      await refreshAll();
+    },
+    [getWriteContract, isOwner, refreshAll]
+  );
 
   return {
     // core
-    owner, minDonationWei, totalDonatedWei, contractBalWei, myDonatedWei, isOwner,
+    owner,
+    minDonationWei,
+    totalDonatedWei,
+    contractBalWei,
+    myDonatedWei,
+    isOwner,
+
     // charities
-    charities, selectedCharity, setSelectedCharity,
+    charities,
+
     // actions
-    refreshAll, refreshCore, refreshCharities,
-    donateToCharity, withdrawOwner,
+    refreshAll,
+    refreshCore,
+    refreshCharities,
+    donateToCharity,
+    withdrawOwner,
   };
 }
